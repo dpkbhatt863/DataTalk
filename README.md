@@ -113,7 +113,7 @@ DataTalk was benchmarked across **20 analytical queries**, ranging from simple l
 | Model / Architecture | Strategy | Execution Success Rate | Result Matching Accuracy | Avg. Latency |
 |---|---|---:|---:|---:|
 | GPT-OSS-20B | Zero-Shot | **100.0%** | **90.0%** | ~1.2s |
-| GPT-OSS-20B | Few-Shot (3 Exemplars) | **100.0%** | **95.0%** | ~1.2s |
+| GPT-OSS-120B | Few-Shot (3 Exemplars) | **100.0%** | **95.0%** | ~1.2s |
 
 ### Key Experimental Insights
 
@@ -190,7 +190,7 @@ The Streamlit dashboard will open in your browser.
 |---|---|
 | LLM Orchestration | LangChain |
 | LLM Inference | Groq Cloud API |
-| Language Models | Llama-3.3-70B / GPT-OSS-20B |
+| Language Models | GPT-OSS-120B |
 | Database | SQLite |
 | Query Layer | SQLAlchemy |
 | Data Engineering | Pandas |
