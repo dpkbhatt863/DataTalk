@@ -1,0 +1,9 @@
+langchain
+ipykernel
+langchain-community
+langchain-groq
+pandas
+tabulate
+streamlit
+sqlalchemy
+python-dotenv
