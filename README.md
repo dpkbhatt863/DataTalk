@@ -200,37 +200,6 @@ The Streamlit dashboard will open in your browser.
 
 ---
 
-## 🔐 Security Considerations
-
-DataTalk includes application-level SQL validation and PII restrictions. These controls should be independently reviewed before production deployment.
-
-Recommended production hardening:
-
-- Use a dedicated read-only database user.
-- Enforce database permissions independently of the LLM.
-- Prefer a SQL parser/AST validator over regex-only validation.
-- Apply query timeouts and resource limits.
-- Log generated queries and validation decisions.
-- Test against SQL injection and obfuscated statements.
-- Prevent unauthorized column access.
-- Avoid exposing sensitive database metadata to the model.
-
----
-
-## 🚀 Future Improvements
-
-- Support for additional open-source and hosted LLMs.
-- Larger and more diverse benchmark datasets.
-- Schema generalization across different databases.
-- Query-cost estimation and optimization.
-- Automatic SQL correction and retry loops.
-- Comprehensive SQL injection testing.
-- Exact-match, execution-match, and component-level SQL evaluation.
-- Experiment tracking and benchmark visualization.
-- Role-based access control.
-
----
-
 ## 👤 Author
 
 **Deepak Bhatt**
