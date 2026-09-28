@@ -41,7 +41,7 @@ STAR SCHEMA JOIN RULES:
 
 
 # ---------- LLM ----------
-def get_llm(model_name: str = "llama-3.3-70b-versatile", temperature: float = 0.0):
+def get_llm(model_name: str = "openai/gpt-oss-120b", temperature: float = 0.0):
     return ChatGroq(
         model_name=model_name,
         temperature=temperature,
