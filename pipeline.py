@@ -1,4 +1,3 @@
-# pipeline.py
 import os
 import re
 import pandas as pd
@@ -13,12 +12,13 @@ load_dotenv()
 DB_PATH = "db/pipeline_db.sqlite"
 PII_COLUMNS = {"contact_no", "nid"}
 
-# ---------- Schema Context ----------
+
 def build_llm_schema_context(db_path: str = DB_PATH) -> str:
     engine = create_engine(f"sqlite:///{db_path}")
     inspector = inspect(engine)
     ddl = []
     for table in inspector.get_table_names():
+        # PII columns are left out so the model never sees them
         cols = [
             f"{c['name']} {c['type']}"
             for c in inspector.get_columns(table)
@@ -40,7 +40,6 @@ STAR SCHEMA JOIN RULES:
     return "\n".join(ddl) + "\n" + joins.strip()
 
 
-# ---------- LLM ----------
 def get_llm(model_name: str = "openai/gpt-oss-120b", temperature: float = 0.0):
     return ChatGroq(
         model_name=model_name,
@@ -49,7 +48,6 @@ def get_llm(model_name: str = "openai/gpt-oss-120b", temperature: float = 0.0):
     )
 
 
-# ---------- SQL Generation ----------
 def generate_sql(question: str, llm, context_str: str) -> str:
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are an expert SQLite engineer. Generate a valid SQLite query.
@@ -70,6 +68,7 @@ RULES:
 
 
 def sanitize_and_validate_sql(raw_sql: str) -> str:
+    # the model sometimes wraps the query in a markdown fence anyway
     sql = re.sub(r"^```(?:sql)?\s*", "", raw_sql.strip(), flags=re.IGNORECASE)
     sql = re.sub(r"\s*```$", "", sql).rstrip(";").strip()
     upper = sql.upper()
@@ -81,9 +80,9 @@ def sanitize_and_validate_sql(raw_sql: str) -> str:
         if re.search(rf"\b{word}\b", upper):
             raise ValueError(f"Forbidden keyword: {word}")
 
-    for pii in ["CONTACT_NO", "NID"]:
-        if re.search(rf"\b{pii}\b", upper):
-            raise ValueError(f"PII column blocked: {pii}")
+    for col in PII_COLUMNS:
+        if re.search(rf"\b{col}\b", sql, re.IGNORECASE):
+            raise ValueError(f"PII column blocked: {col.upper()}")
 
     return sql
 
@@ -104,6 +103,7 @@ def synthesize_answer(question: str, sql: str, df: pd.DataFrame, llm) -> str:
         ("human", "Question: {q}\nSQL: {sql}\nResults:\n{data}\n\nShort answer:")
     ])
     chain = prompt | llm | StrOutputParser()
+    # first 15 rows only, to keep the prompt small
     return chain.invoke({
         "q": question,
         "sql": sql,
@@ -119,4 +119,5 @@ def ask_database(question: str, llm, context_str: str) -> dict:
         answer = synthesize_answer(question, sql, df, llm)
         return {"success": True, "sql": sql, "df": df, "answer": answer, "error": None}
     except Exception as e:
+        # app.py shows any failure (LLM, validation, DB) as an error message
         return {"success": False, "sql": None, "df": None, "answer": None, "error": str(e)}
