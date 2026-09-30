@@ -1,5 +1,5 @@
 
-# 📊 DataTalk — Production Text-to-SQL Engine & Evaluation Suite
+# DataTalk — Production Text-to-SQL Engine & Evaluation Suite
 
 DataTalk is a production-grade Text-to-SQL engine and evaluation pipeline that translates natural language analytical questions into executable, secure SQL queries over a **1,000,000-row Star Schema Data Warehouse**.
 
@@ -7,14 +7,20 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
 
 ---
 
+---
+## 🎬 Interactive Demo
+
+<img width="1900" height="876" alt="texttoSQLgiF" src="https://github.com/user-attachments/assets/f9a66b7d-002f-4bfa-86d4-ce285b618844" />
+
+
 ## 🏗️ Architecture & Workflow
 
 ```text
-┌─────────────────┐
-│  User Question  │
-└────────┬────────┘
-         │
-         ▼
+         ┌─────────────────┐
+         │  User Question  │
+         └────────┬────────┘
+                  │
+                  ▼
 ┌─────────────────────────────────────────────┐
 │               Prompt Engine                 │
 │                                             │
@@ -26,7 +32,7 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
                      ▼
 ┌─────────────────────────────────────────────┐
 │             Groq Inference API              │
-│        Llama-3.3-70B / GPT-OSS-20B          │
+│                 GPT-OSS-20B                 │
 └────────────────────┬────────────────────────┘
                      │
                      ▼
@@ -34,7 +40,7 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
 │             Security Guardrail              │
 │                                             │
 │ • Read-Only SQL Validator                   │
-│ • Code Block Stripper                       │
+│                                             │
 │ • Destructive Query Blocking                │
 └────────────────────┬────────────────────────┘
                      │
@@ -197,11 +203,4 @@ The Streamlit dashboard will open in your browser.
 | Tabular Formatting | Tabulate |
 | Frontend | Streamlit |
 | Evaluation | Custom Benchmark Pipeline |
-
----
-
-## 👤 Author
-
-**Deepak Bhatt**
-
 ---
