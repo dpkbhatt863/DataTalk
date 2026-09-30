@@ -1,5 +1,5 @@
 
-# DataTalk — Production Text-to-SQL Engine & Evaluation Suite
+# DataTalk - Production Text-to-SQL Engine & Evaluation Suite
 
 DataTalk is a production-grade Text-to-SQL engine and evaluation pipeline that translates natural language analytical questions into executable, secure SQL queries over a **1,000,000-row Star Schema Data Warehouse**.
 
@@ -13,7 +13,7 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
 <img width="1900" height="876" alt="texttoSQLgiF" src="https://github.com/user-attachments/assets/f9a66b7d-002f-4bfa-86d4-ce285b618844" />
 
 
-## 🏗️ Architecture & Workflow
+## Architecture & Workflow
 
 ```text
          ┌─────────────────┐
@@ -58,7 +58,7 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 ### 1. Star Schema Context Injection
 
@@ -112,7 +112,7 @@ The interactive dashboard includes:
 
 ---
 
-## 📊 Benchmark & Evaluation Results
+## Benchmark & Evaluation Results
 
 DataTalk was benchmarked across **20 analytical queries**, ranging from simple lookups to complex multi-join aggregations over a 1-million-row database.
 
@@ -141,7 +141,7 @@ The benchmark reported a 100% execution success rate across the 20-query test se
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 DataTalk/
@@ -155,7 +155,7 @@ DataTalk/
 
 ---
 
-## ⚡ Quickstart
+## Quickstart
 
 ### 1. Clone the Repository
 
@@ -190,7 +190,7 @@ The Streamlit dashboard will open in your browser.
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Technology |
 |---|---|
