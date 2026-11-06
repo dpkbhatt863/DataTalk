@@ -1,123 +1,112 @@
-import os
 import re
 import pandas as pd
-from sqlalchemy import create_engine, text, inspect
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, inspect, text
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from dotenv import load_dotenv
 
 load_dotenv()
 
 DB_PATH = "db/pipeline_db.sqlite"
+MODEL = "openai/gpt-oss-120b"
 PII_COLUMNS = {"contact_no", "nid"}
+MAX_ROWS = 1000
+
+engine = create_engine(f"sqlite:///{DB_PATH}")
 
 
-def build_llm_schema_context(db_path: str = DB_PATH) -> str:
-    engine = create_engine(f"sqlite:///{db_path}")
-    inspector = inspect(engine)
+def make_llm(model=MODEL):
+    return ChatGroq(model_name=model, temperature=0.0, max_tokens=1024)
+
+
+def build_schema_context():
+    insp = inspect(engine)
     ddl = []
-    for table in inspector.get_table_names():
-        # PII columns are left out so the model never sees them
-        cols = [
-            f"{c['name']} {c['type']}"
-            for c in inspector.get_columns(table)
-            if c["name"] not in PII_COLUMNS
-        ]
-        ddl.append(f"CREATE TABLE {table} ({', '.join(cols)});")
-    engine.dispose()
-
-    joins = """
-STAR SCHEMA JOIN RULES:
-- Center: fact_table
+    for t in insp.get_table_names():
+        cols = [c["name"] + " " + str(c["type"]) for c in insp.get_columns(t) if c["name"] not in PII_COLUMNS]
+        ddl.append("CREATE TABLE " + t + " (" + ", ".join(cols) + ");")
+    rules = """STAR SCHEMA JOIN RULES:
+- Center table: fact_table
 - fact_table.customer_key = customer_dim.customer_key
 - fact_table.item_key     = item_dim.item_key
 - fact_table.store_key    = store_dim.store_key
 - fact_table.time_key     = time_dim.time_key
 - fact_table.payment_key  = trans_dim.payment_key
-- Always join dimensions through fact_table. Never join two dims directly.
+- Always join dimensions through fact_table. Never join two dimensions directly."""
+    return "\n".join(ddl) + "\n" + rules
+
+
+FEW_SHOT = """
+### EXAMPLES:
+Q: How many sales were paid by mobile payment?
+SQL: SELECT COUNT(*) AS mobile_sales FROM fact_table JOIN trans_dim ON fact_table.payment_key = trans_dim.payment_key WHERE UPPER(trans_dim.trans_type) = 'MOBILE';
+
+Q: What was the total revenue in Chittagong in 2016?
+SQL: SELECT SUM(fact_table.total_price) AS total_revenue FROM fact_table JOIN store_dim ON fact_table.store_key = store_dim.store_key JOIN time_dim ON fact_table.time_key = time_dim.time_key WHERE UPPER(store_dim.division) = 'CHITTAGONG' AND time_dim.year = 2016;
+
+Q: Which 2 suppliers have the most items?
+SQL: SELECT supplier, COUNT(*) AS item_count FROM item_dim GROUP BY supplier ORDER BY item_count DESC LIMIT 2;
 """
-    return "\n".join(ddl) + "\n" + joins.strip()
 
+SYSTEM = """You are an expert SQL engineer. Generate a valid SQLite query.
 
-def get_llm(model_name: str = "openai/gpt-oss-120b", temperature: float = 0.0):
-    return ChatGroq(
-        model_name=model_name,
-        temperature=temperature,
-        api_key=os.getenv("GROQ_API_KEY"),
-    )
-
-
-def generate_sql(question: str, llm, context_str: str) -> str:
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are an expert SQLite engineer. Generate a valid SQLite query.
-
-{context_str}
+{context}
 
 RULES:
-1. Return ONLY raw SQL. No markdown, no explanation.
-2. ONLY SELECT / WITH statements.
-3. Use UPPER() for string filters (e.g. UPPER(division) = 'SYLHET').
-4. Never select PII columns (contact_no, nid).
-5. Prefer COUNT(*) for transaction counts unless asked for distinct.
-"""),
-        ("human", "Question: {question}")
-    ])
-    chain = prompt | llm | StrOutputParser()
-    return chain.invoke({"question": question, "context_str": context_str}).strip()
+1. Return ONLY raw SQL. No markdown fences, no explanations.
+2. Write ONLY SELECT statements.
+3. Handle case with UPPER() (e.g. UPPER(store_dim.division) = 'SYLHET').
+4. Do NOT select PII fields (contact_no, nid)."""
+prompt = ChatPromptTemplate.from_messages([("system", SYSTEM), ("human", "Question: {question}")])
+
+answer_prompt = ChatPromptTemplate.from_messages([
+    ("system", "Answer the question in one or two plain sentences, using only the result table provided."),
+    ("human", "Question: {question}\n\nResult (first rows):\n{table}"),
+])
 
 
-def sanitize_and_validate_sql(raw_sql: str) -> str:
-    # the model sometimes wraps the query in a markdown fence anyway
-    sql = re.sub(r"^```(?:sql)?\s*", "", raw_sql.strip(), flags=re.IGNORECASE)
+def generate_sql(question, llm, context):
+    return (prompt | llm | StrOutputParser()).invoke({"question": question, "context": context}).strip()
+
+
+def validate_sql(raw):
+    sql = re.sub(r"^```(?:sql)?\s*", "", raw.strip(), flags=re.I)
     sql = re.sub(r"\s*```$", "", sql).rstrip(";").strip()
-    upper = sql.upper()
-
-    if not (upper.startswith("SELECT") or upper.startswith("WITH")):
-        raise ValueError("Only SELECT queries are allowed.")
-
-    for word in ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE"]:
-        if re.search(rf"\b{word}\b", upper):
-            raise ValueError(f"Forbidden keyword: {word}")
-
-    for col in PII_COLUMNS:
-        if re.search(rf"\b{col}\b", sql, re.IGNORECASE):
-            raise ValueError(f"PII column blocked: {col.upper()}")
-
+    up = sql.upper()
+    if not up.startswith(("SELECT", "WITH")):
+        raise ValueError("Only SELECT queries are permitted.")
+    for w in ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE"]:
+        if re.search(rf"\b{w}\b", up):
+            raise ValueError(f"Forbidden keyword: {w}")
+    for pii in ["CONTACT_NO", "NID"]:
+        if re.search(rf"\b{pii}\b", up):
+            raise ValueError(f"PII field blocked: {pii}")
     return sql
 
 
-def execute_sql(sql: str, db_path: str = DB_PATH) -> pd.DataFrame:
-    engine = create_engine(f"sqlite:///{db_path}")
+def run_sql(sql, max_rows=None):
     with engine.connect() as conn:
-        df = pd.read_sql(text(sql), conn)
-    engine.dispose()
-    return df
+        result = conn.execute(text(sql))
+        rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
+        return pd.DataFrame(rows, columns=list(result.keys()))
 
 
-def synthesize_answer(question: str, sql: str, df: pd.DataFrame, llm) -> str:
+def summarize(question, df, llm):
     if df.empty:
-        return "No records found for your request."
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a concise data analyst. Answer clearly using the results."),
-        ("human", "Question: {q}\nSQL: {sql}\nResults:\n{data}\n\nShort answer:")
-    ])
-    chain = prompt | llm | StrOutputParser()
-    # first 15 rows only, to keep the prompt small
-    return chain.invoke({
-        "q": question,
-        "sql": sql,
-        "data": df.head(15).to_markdown(index=False)
-    })
-
-
-def ask_database(question: str, llm, context_str: str) -> dict:
+        return "The query ran but returned no rows."
     try:
-        raw = generate_sql(question, llm, context_str)
-        sql = sanitize_and_validate_sql(raw)
-        df = execute_sql(sql)
-        answer = synthesize_answer(question, sql, df, llm)
-        return {"success": True, "sql": sql, "df": df, "answer": answer, "error": None}
+        table = df.head(20).to_string(index=False)
+        return (answer_prompt | llm | StrOutputParser()).invoke({"question": question, "table": table}).strip()
+    except Exception:
+        return f"Returned {len(df)} row(s)."
+
+
+def ask_database(question, llm, context):
+    sql = None
+    try:
+        sql = validate_sql(generate_sql(question, llm, context))
+        df = run_sql(sql, max_rows=MAX_ROWS)
     except Exception as e:
-        # app.py shows any failure (LLM, validation, DB) as an error message
-        return {"success": False, "sql": None, "df": None, "answer": None, "error": str(e)}
+        return {"success": False, "error": str(e), "sql": sql}
+    return {"success": True, "sql": sql, "df": df, "answer": summarize(question, df, llm)}
