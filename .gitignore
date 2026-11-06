@@ -1,11 +1,8 @@
-# Environment variables (SECRETS)
 .env
 
-# SQLite Database (Binary)
 db/*.sqlite
 *.sqlite
 
-# Python Cache & Virtual Environments
 __pycache__/
 *.pyc
 .venv/
@@ -13,6 +10,5 @@ venv/
 env/
 .ipynb_checkpoints/
 
-# Operating System Files
 .DS_Store
 Thumbs.db
