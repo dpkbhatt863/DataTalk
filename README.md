@@ -28,6 +28,8 @@ Question ──> Prompt (schema + join rules + examples) ──> LLM via Groq
 
 ## The benchmark
 
+eval.ipynb is the file with all the test experimentations and results. This is the evaluation part.
+
 It asks each model a fixed set of questions, runs the SQL it writes, and compares the result with the result of a hand-written correct query.
 
 - **30 queries:** 28 that need SQL (11 easy, 12 medium, 5 hard) and 2 guardrail requests that should be blocked, such as asking for customers' phone numbers or deleting records.
