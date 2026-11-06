@@ -1,9 +1,8 @@
+# DataTalk
 
-# DataTalk - Production Text-to-SQL Engine & Evaluation Suite
+Ask a question in plain English, get the SQL, the result table and a short answer back. It runs over a 1,000,000-row retail star schema in SQLite.
 
-DataTalk is a production-grade Text-to-SQL engine and evaluation pipeline that translates natural language analytical questions into executable, secure SQL queries over a **1,000,000-row Star Schema Data Warehouse**.
-
-Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit**, DataTalk features dynamic schema context injection, strict security guardrails, data governance, PII masking, and an automated benchmark evaluation framework.
+I built it to learn how well an LLM can actually write SQL against a real warehouse, so half of this repo is the app and the other half is a benchmark that tests it.
 
 ---
 
@@ -13,194 +12,118 @@ Built with **LangChain**, **Groq**, **SQLite**, **SQLAlchemy**, and **Streamlit*
 <img width="1900" height="876" alt="texttoSQLgiF" src="https://github.com/user-attachments/assets/f9a66b7d-002f-4bfa-86d4-ce285b618844" />
 
 
-## Architecture & Workflow
+## How it works
 
-```text
-         ┌─────────────────┐
-         │  User Question  │
-         └────────┬────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────┐
-│               Prompt Engine                 │
-│                                             │
-│ • Star Schema Join Context                  │
-│ • PII Column Masking                        │
-│ • Few-Shot Exemplar Injection               │
-└────────────────────┬────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────┐
-│             Groq Inference API              │
-│                 GPT-OSS-20B                 │
-└────────────────────┬────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────┐
-│             Security Guardrail              │
-│                                             │
-│ • Read-Only SQL Validator                   │
-│                                             │
-│ • Destructive Query Blocking                │
-└────────────────────┬────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────┐
-│          SQLite Warehouse Engine            │
-│           1,000,000 Fact Records             │
-└────────────────────┬────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────┐
-│           Synthesized Natural Answer        │
-└─────────────────────────────────────────────┘
+The app uses `openai/gpt-oss-120b` on Groq with three few-shot examples at temperature 0, which was the best-scoring setup in the benchmark below.
+
+```
+Question ──> Prompt (schema + join rules + examples) ──> LLM via Groq
+         ──> SQL validator (read-only, no PII) ──> SQLite ──> Table + short answer
 ```
 
----
+1. **Prompt.** The prompt contains the table definitions and the join rules for the star schema: one `fact_table` joined to `customer_dim`, `item_dim`, `store_dim`, `time_dim` and `trans_dim`. A few worked examples are added on top.
+2. **PII is hidden from the model.** `contact_no` and `nid` are left out of the schema the model sees, and the validator also rejects any query that mentions them.
+3. **Validation before execution.** Only `SELECT` and `WITH` queries go through. Anything with `DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER` or `TRUNCATE` is blocked, and markdown fences around the SQL are stripped. This is a keyword and regex check, not a full SQL parser, so treat it as a safety net rather than a security boundary.
+4. **Answer.** The result is shown as a table, with a one-line natural language summary and a CSV download.
 
-## Key Features
+## The benchmark
 
-### 1. Star Schema Context Injection
+It asks each model a fixed set of questions, runs the SQL it writes, and compares the result with the result of a hand-written correct query.
 
-Automatically injects multi-table JOIN rules connecting the central `fact_table` to five dimension tables:
+- **30 queries:** 28 that need SQL (11 easy, 12 medium, 5 hard) and 2 guardrail requests that should be blocked, such as asking for customers' phone numbers or deleting records.
+- **Scoring:** a query counts as correct when its result set matches the reference. Row order and column names are ignored, text is compared case-insensitively, numbers can differ by 1%, and extra columns are fine.
+- **Guardrail queries** pass if the request is blocked or answered without touching PII or writing data.
+- **Fair setup:** temperature 0, the same prompt for every model, and the few-shot examples are not in the test set. The notebook has an assertion that fails if a test question is copied into the examples.
 
-- `customer_dim`
-- `item_dim`
-- `store_dim`
-- `time_dim`
-- `trans_dim`
+### Models tried
 
-This helps the LLM generate SQL queries that follow the warehouse schema and relationship rules.
+| Model | Provider |
+|---|---|
+| `openai/gpt-oss-120b` | Groq |
+| `qwen/qwen3.8-27b` | Groq |
+| `gemini-3.5-flash-lite` | Google AI Studio |
 
-### 2. Data Governance & PII Protection
+### Accuracy (28 SQL queries)
 
-- Removes sensitive customer fields such as `contact_no` and `nid` from the LLM prompt context.
-- Applies execution-level restrictions to prevent PII exfiltration.
-- Separates analytical access from sensitive customer information.
+| Model | Prompting | Runs without error | Accuracy | Easy | Medium | Hard | Guardrails |
+|---|---|---|---|---|---|---|---|
+| gpt-oss-120b | zero-shot | 96–100% | 85.7–89.3% | 90.9% | 83.3% | 80–100% | 2/2 |
+| gpt-oss-120b | few-shot (3 examples) | 100% | **100%** | 100% | 100% | 100% | 2/2 |
+| qwen3.8-27b | few-shot | 100% | 92.9% | 100% | 100% | 60% | 2/2 |
+| gemini-3.5-flash-lite | few-shot | 100% | 96.4% | 100% | 100% | 80% | 2/2 |
 
-### 3. SQL Security Guardrails
+The zero-shot row is a range because I ran the benchmark twice and got different results (more on that below). The few-shot rows were identical both times.
 
-- Allows read-only `SELECT` and `WITH` statements.
-- Blocks destructive operations such as:
-  - `DROP`
-  - `DELETE`
-  - `UPDATE`
-  - `ALTER`
-- Strips Markdown code fences from generated SQL.
-- Uses AST/regex-based validation logic to inspect generated queries.
+### Latency (average per query)
 
-### 4. Automated Benchmark Framework
+| Model | Prompting | Model call only | End to end |
+|---|---|---|---|
+| gpt-oss-120b | zero-shot | 1.56s | 8.91s |
+| gpt-oss-120b | few-shot | 1.62s | 7.32s |
+| qwen3.8-27b | few-shot | 2.86s | 7.08s |
+| gemini-3.5-flash-lite | few-shot | 1.89s | 6.56s |
 
-Evaluates LLM performance across **20 analytical queries** using:
+"End to end" includes validation, running the SQL on the 1M-row database and comparing with the reference, so it contains benchmark overhead. The zero-shot run also went first, so it paid the one-time cost of running the reference queries. The app itself is faster than these numbers. The model call is under 3 seconds for every model.
 
-- Execution Success Rate
-- Result Matching Accuracy
-- Average Query Latency
-- Temperature Sensitivity
-- Zero-shot versus few-shot prompting
+### What I took from it
 
-### 5. Streamlit Web Application
+- **Examples helped the most.** Three examples moved gpt-oss-120b from roughly 86-89% to 100% on both runs, which is 3 to 4 queries out of 28. Most zero-shot misses looked like data conventions that the schema doesn't tell the model, for example countries are stored in mixed case (`poland` is lowercase) and what counts as one sale.
+- **The models are close on easy and medium questions.** Almost all the difference is in the hard tier, which has only 5 queries, so one query is 20 points. That's too little to rank the models.
+- **I couldn't test Gemini 3.6 Flash.** Its free-tier daily limit ran out partway through and returned rate-limit errors, so I switched to 3.5 Flash-Lite and left 3.6 out of the results.
 
-The interactive dashboard includes:
+## Limitations
 
-- Natural-language question input
-- Quick-sample question buttons
-- Generated SQL inspection
-- Tabular result display
-- Natural-language answer synthesis
-- CSV export
+- 28 SQL queries on one database is a small test. It shows the method works, not that it will hold on a different schema.
+- The hard tier has 5 queries, so those numbers are rough.
 
----
+## Repository structure
 
-## Benchmark & Evaluation Results
-
-DataTalk was benchmarked across **20 analytical queries**, ranging from simple lookups to complex multi-join aggregations over a 1-million-row database.
-
-| Model / Architecture | Strategy | Execution Success Rate | Result Matching Accuracy | Avg. Latency |
-|---|---|---:|---:|---:|
-| GPT-OSS-20B | Zero-Shot | **100.0%** | **90.0%** | ~1.2s |
-| GPT-OSS-120B | Few-Shot (3 Exemplars) | **100.0%** | **95.0%** | ~1.2s |
-
-### Key Experimental Insights
-
-#### 1. Few-Shot In-Context Learning (+5 Percentage Points)
-
-Adding three exemplar queries improved result-matching accuracy from **90.0% to 95.0%**.
-
-The exemplars helped resolve semantic ambiguity around business definitions, such as mapping sales transaction counts to `COUNT(*)`.
-
-#### 2. Deterministic Decoding (Temperature = 0.0)
-
-A temperature of `0.0` performed better than `0.7` in the reported structural SQL correctness tests, suggesting that deterministic decoding may be useful for repeatable SQL-generation tasks.
-
-#### 3. Execution Reliability (100% Reported Execution Rate)
-
-The benchmark reported a 100% execution success rate across the 20-query test set after applying SQL sanitization and validation logic.
-
-> **Note:** These results are specific to the reported benchmark configuration and dataset. They should not be interpreted as a guarantee of performance on unseen schemas, databases, or business questions.
-
----
-
-## Repository Structure
-
-```text
+```
 DataTalk/
-├── app.py                       # Streamlit application dashboard
-├── pipeline.py                  # Text-to-SQL engine, validation, and execution
-├── text_to_sql_pipeline.ipynb   # R&D notebook, ingestion, experiments, and benchmarks
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment variable template
-└── README.md                     # Project documentation
+├── app.py                       # Streamlit app
+├── pipeline.py                  # Prompt, validation and execution
+├── eval.ipynb                   # The 30-query benchmark
+├── benchmark_results.csv        # Generated SQL and scores for every run
+├── requirements.txt
+├── .env.example
+└── README.md
 ```
 
----
+## Running it
 
-## Quickstart
-
-### 1. Clone the Repository
+**1. Clone and install**
 
 ```bash
 git clone https://github.com/YOUR-USERNAME/DataTalk.git
 cd DataTalk
-```
-
-### 2. Install Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure the API Key
+**2. Add your keys**
 
-Create a `.env` file in the project root:
+Create a `.env` file:
 
 ```env
-GROQ_API_KEY=gsk_your_groq_api_key_here
+GROQ_API_KEY=your_groq_key
+GOOGLE_API_KEY=your_google_key   # only needed to run the Gemini rows of the benchmark
 ```
 
-> Never commit your real API key to version control. Add `.env` to `.gitignore`.
+Never commit `.env`. It should be in `.gitignore`.
 
-### 4. Launch the Web Application
+**3. Build the database**
+
+The SQLite file (1M rows) is too big for the repo. Run the ingestion cells in `eval.ipynb` to create `db/pipeline_db.sqlite`.
+
+**4. Start the app**
 
 ```bash
 streamlit run app.py
 ```
 
-The Streamlit dashboard will open in your browser.
+**5. Run the benchmark (optional)**
 
----
+Open `eval.ipynb` and run the cells in order. The Gemini model is paced to stay inside the free-tier rate limit, so that part takes a few minutes.
 
-## Tech Stack
+## Stack
 
-| Component | Technology |
-|---|---|
-| LLM Orchestration | LangChain |
-| LLM Inference | Groq Cloud API |
-| Language Models | GPT-OSS-120B |
-| Database | SQLite |
-| Query Layer | SQLAlchemy |
-| Data Engineering | Pandas |
-| Tabular Formatting | Tabulate |
-| Frontend | Streamlit |
-| Evaluation | Custom Benchmark Pipeline |
----
+Python, LangChain, Groq, Google Gemini, SQLite, SQLAlchemy, pandas, Streamlit
