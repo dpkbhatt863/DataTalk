@@ -67,7 +67,7 @@ if st.button("Run Query", type="primary"):
             st.code(result["sql"], language="sql")
 
             st.subheader("Query Results")
-            st.dataframe(df, width='strech')
+            st.dataframe(df, width='stretch')
             note = f"Returned {len(df)} row(s)."
             if len(df) == MAX_ROWS:
                 note += f" Showing the first {MAX_ROWS} only."
