@@ -1,5 +1,6 @@
 import re
 import pandas as pd
+import os, gzip, shutil
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
 from langchain_groq import ChatGroq
@@ -13,8 +14,17 @@ MODEL = "openai/gpt-oss-120b"
 PII_COLUMNS = {"contact_no", "nid"}
 MAX_ROWS = 1000
 
-engine = create_engine(f"sqlite:///{DB_PATH}")
+def ensure_db():
+    if os.path.exists(DB_PATH):
+        return
+    if not os.path.exists(DB_PATH + ".gz"):
+        raise RuntimeError(f"Database not found: {DB_PATH} or {DB_PATH}.gz")
+    with gzip.open(DB_PATH + ".gz", "rb") as f_in, open(DB_PATH + ".tmp", "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    os.replace(DB_PATH + ".tmp", DB_PATH)
 
+ensure_db()
+engine = create_engine(f"sqlite:///file:{DB_PATH}?mode=ro&uri=true")
 
 def make_llm(model=MODEL):
     return ChatGroq(model_name=model, temperature=0.0, max_tokens=1024)
