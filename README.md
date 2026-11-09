@@ -26,9 +26,31 @@ Question ──> Prompt (schema + join rules + examples) ──> LLM via Groq
 3. **Validation before execution.** Only `SELECT` and `WITH` queries go through. Anything with `DROP`, `DELETE`, `INSERT`, `UPDATE`, `ALTER` or `TRUNCATE` is blocked, and markdown fences around the SQL are stripped. This is a keyword and regex check, not a full SQL parser, so treat it as a safety net rather than a security boundary.
 4. **Answer.** The result is shown as a table, with a one-line natural language summary and a CSV download.
 
+## The data
+
+The warehouse is a standard star schema: one big fact table and five small dimension tables.
+
+| Table | Rows | What it holds |
+|---|---|---|
+| `fact_table` | 1,000,000 | One row per sale: quantity, unit price, total price, and keys to the dimensions |
+| `customer_dim` | 9,191 | Customers (including `contact_no` and `nid`, which the app treats as PII) |
+| `item_dim` | 264 | Item name, country of manufacture, supplier, unit |
+| `store_dim` | 726 | Stores with their division and district |
+| `time_dim` | about 100,000 | One row per timestamp, with year, quarter, month and week |
+| `trans_dim` | 39 | Payment type and bank |
+
+The database is built from six CSV files by `db_build.ipynb`. It's a short script and I kept it plain:
+
+1. **Read** each CSV, falling back to latin-1 if the file isn't UTF-8.
+2. **Clean the column names:** lowercase, and anything other than letters, digits and underscores becomes `_`.
+3. **Check the foreign keys.** Every customer, item, store, time and payment key in `fact_table` must exist in its dimension table. If any row points to a missing key, the build stops and says how many.
+4. **Write** each table to SQLite.
+
+It never changes the values inside the tables. The data has quirks, such as country names in mixed case (`poland` is lowercase), payment types in lowercase, and units like `ct` and `ct.` stored as separate values. I left them in on purpose, because real warehouses look like this and the benchmark checks whether the model copes with it.
+
 ## The benchmark
 
-eval.ipynb is the file with all the test experimentations and results. This is the evaluation part.
+This is the evaluation part. **eval.ipynb** is the file with all the test experimentations and results. 
 
 It asks each model a fixed set of questions, runs the SQL it writes, and compares the result with the result of a hand-written correct query.
 
@@ -82,10 +104,10 @@ The zero-shot row is a range because I ran the benchmark twice and got different
 
 ```
 DataTalk/
+├── db_build.ipynb  
 ├── app.py                       # Streamlit app
 ├── pipeline.py                  # Prompt, validation and execution
 ├── eval.ipynb                   # The 30-query benchmark
-├── benchmark_results.csv        # Generated SQL and scores for every run
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -112,9 +134,10 @@ GOOGLE_API_KEY=your_google_key   # only needed to run the Gemini rows of the ben
 
 Never commit `.env`. It should be in `.gitignore`.
 
-**3. Build the database**
+**3. Get the database**
 
-The SQLite file (1M rows) is too big for the repo. Run the ingestion cells in `eval.ipynb` to create `db/pipeline_db.sqlite`.
+- **Just want to run the app?** Skip this step. The repo includes `db/pipeline_db.sqlite.gz`, and the app unpacks it the first time it starts.
+- **Want to rebuild it from the raw data?** Put the six CSV files in a `csvs/` folder and run `db_build.ipynb`.
 
 **4. Start the app**
 
